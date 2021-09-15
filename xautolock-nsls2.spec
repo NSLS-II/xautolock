@@ -1,13 +1,11 @@
 Name:		xautolock-nsls2
-Version:	2.2
+Version:	%{version}
 Release:	1%{?dist}
 Summary:	Program launcher for idle X sessions
 
 License:	apache
 URL:		  https://www.ibiblio.org/pub/Linux/X11/screensavers/
 Source0:	https://www.ibiblio.org/pub/Linux/X11/screensavers/xautolock-%{version}.tgz
-Patch0:		xautolock.patch
-Patch1:		xautolock-allow-locknow.patch
 
 BuildRequires: imake libXScrnSaver-devel
 Requires: libXScrnSaver
@@ -22,9 +20,7 @@ if you have left your computer unattended for some period of time.  The
 program launched need not be a screen locker such as xlock.
 
 %prep
-%setup -n xautolock-%{version}
-%patch0 -p1
-%patch1 -p1
+%setup -n xautolock-%{version}-nsls2
 xmkmf
 
 %build
@@ -36,4 +32,3 @@ xmkmf
 %files
 %{_bindir}/xautolock
 %{_mandir}/man1/xautolock.1x.gz
-
