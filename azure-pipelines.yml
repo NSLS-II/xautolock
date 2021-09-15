@@ -1,0 +1,113 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+  branches:
+    include:
+    - nsls2
+    - releases/*
+  tags:
+    include:
+    - v*
+
+variables:
+  System.Debug: true
+
+stages:
+- stage: Build
+
+  jobs:
+  - job: Build
+    pool:
+      vmImage: 'ubuntu-latest'
+
+    strategy:
+      matrix:
+        centos8:
+          containerImage: stuwilkins/xsecurelock-build-centos8:latest
+          pkg_type: redhat
+          rpmrelease: centos8
+        centos7:
+          containerImage: stuwilkins/xsecurelock-build-centos7:latest
+          pkg_type: redhat
+          rpmrelease: centos7
+
+    container:
+      image: $[ variables['containerImage'] ]
+
+    steps:
+    - script: |
+        xmkmf
+      displayName: Run xmkmf
+
+    - script: |
+        make
+      displayName: Build
+
+    - script: |
+        GITDESC=$(git describe --abbrev=0)
+        VERSION=$(git describe --abbrev=0 | sed -En 's/v([0-9]+\.)([0-9]+\.)?([0-9]+)-.*/\1\2\3/p')
+        echo "##vso[task.setvariable variable=gitdesc]$GITDESC"
+        echo "##vso[task.setvariable variable=gitversion]$VERSION"
+        echo "##[debug] GITDESC = $GITDESC"
+        echo "##[debug] VERSION = $VERSION"
+      displayName: Set Git Describe to Variable
+
+    - script: |
+        set -e
+        RPMDIR="`pwd`/rpmbuild"
+        echo $RPMDIR
+        SOURCES=${RPMDIR}/SOURCES
+        mkdir -p ${SOURCES}
+        git archive --format=tar \
+          --prefix=xautolock-$(gitversion)-nsls2/ \
+          --output=${SOURCES}/xautolock-v$(gitversion)-nsls2.tar.gz \
+          HEAD
+        rpmbuild -bb --define "_topdir ${RPMDIR}" --define "version $(gitversion)" xautolock-nsls2.spec
+        echo "##[debug] gitdesc = $(gitdesc)"
+      displayName: 'Build rpm Package'
+      condition: and(succeeded(), eq(variables.pkg_type, 'redhat'))
+
+    - task: CopyFiles@2
+      inputs:
+        targetFolder: '$(Build.ArtifactStagingDirectory)'
+        contents: rpmbuild/RPMS/x86_64/*
+        flattenFolders: true
+      condition: and(succeeded(), eq(variables.pkg_type, 'redhat'))
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: '$(Build.ArtifactStagingDirectory)'
+        artifactName: packages
+      displayName: Publish RedHat Packages
+      condition: and(succeeded(), eq(variables.pkg_type, 'redhat'))
+
+  - job: Publish
+    dependsOn: Build
+    condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/v')
+    steps:
+      - script: |
+          GITDESC=$(git describe --abbrev=0)
+          echo "##vso[task.setvariable variable=gitdesc]$GITDESC"
+          echo "##[debug] GITDESC = $GITDESC"
+        displayName: Set Git Describe to Variable
+      - task: DownloadBuildArtifacts@0
+        inputs:
+          buildType: 'current'
+          downloadType: 'single'
+          artifactName: 'packages'
+          downloadPath: '$(System.ArtifactsDirectory)'
+        displayName: Download Packages
+      - task: GithubRelease@0
+        inputs:
+          gitHubConnection: github.com_stuwilkins
+          repositoryName: NSLS-II/xautolock
+          assets: '$(System.ArtifactsDirectory)/**/*'
+          action: edit
+          target: '$(Build.SourceVersion)'
+          tag: $(gitdesc)
+          addChangeLog: false
+          assetUploadMode: replace
+        displayName: 'Attach package to release'
